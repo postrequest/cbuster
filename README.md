@@ -1,6 +1,6 @@
 # cbuster
 
-Simple and quick (Directory && File) Fuzzer.
+Simple and quick (directory && file) fuzzer.
 
 \* No Responsibility taken for melted NICs
 
