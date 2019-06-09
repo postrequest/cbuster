@@ -1,5 +1,7 @@
 # cbuster
 
+Simple and quick Directory Bruteforcer.
+
 \* No Responsibility taken for melted NICs
 
 ### Install

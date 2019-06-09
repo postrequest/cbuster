@@ -27,9 +27,9 @@
 
 void usage(char *argument) {
     fprintf(stderr, "Usage: %s -u <url> -w <wordlist> -x <extensions>\n", argument);
-    fprintf(stderr, "       -u          URL\n", argument);
-    fprintf(stderr, "       -w          Wordlist\n", argument);
-    fprintf(stderr, "       -x          Extensions (optional)\n", argument);
+    fprintf(stderr, "       -u          URL\n");
+    fprintf(stderr, "       -w          Wordlist\n");
+    fprintf(stderr, "       -x          Extensions (optional)\n");
     fprintf(stderr, "       %s -u http://example.com:8000/test/ -w rockyou.txt -x php,txt,html\n", argument);
     exit(EXIT_FAILURE);
 }
