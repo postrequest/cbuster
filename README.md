@@ -1,6 +1,6 @@
 # cbuster
 
-Simple and quick Directory Bruteforcer.
+Simple and quick (Directory && File) Fuzzer.
 
 \* No Responsibility taken for melted NICs
 
