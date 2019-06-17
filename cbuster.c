@@ -1,115 +1,35 @@
 /*
  *
- * Crude directory buster
+ * C directory buster
  * 
- * $ cc cbuster.c -lssl -ltls -lcrypto -o switch_melter
- * 
- * No responsibilty taken for melted NICs
+ * $ cc cbuster.c -ldill -o cbuster
  *
  */
 
 #include <stdio.h>
-#include <netdb.h>
-#include <sys/types.h>
-#include <sys/wait.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
 #include <string.h>
 #include <stdlib.h>
 #include <getopt.h>
 #include <unistd.h>
 #include <stdbool.h>
-#include <openssl/ssl.h>
-#include <openssl/err.h>
-#include <sys/prctl.h>
-#include <signal.h>
+#include <errno.h>
+#include <libdill.h>
 
 void usage(char *argument) {
     fprintf(stderr, "Usage: %s -u <url> -w <wordlist> -x <extensions>\n", argument);
     fprintf(stderr, "       -u          URL\n");
     fprintf(stderr, "       -w          Wordlist\n");
     fprintf(stderr, "       -x          Extensions (optional)\n");
-    fprintf(stderr, "       %s -u http://example.com:8000/test/ -w rockyou.txt -x php,txt,html\n", argument);
+    fprintf(stderr, "       -d          Add headers to request (optional)\n");
+    fprintf(stderr, "       -t          Threads (default: 10)\n");
+    fprintf(stderr, "Example:\n");
+    fprintf(stderr, "  %s -u http://example.com:8000/test/ -w rockyou.txt -x php,txt,html -d \"Authorization: YWRtaW46YWRtaW4=\" -t 60\n", argument);
     exit(EXIT_FAILURE);
 }
 
-void validate(char* program_name, char *request, int reqlen, char *test_req, struct addrinfo *res, bool https) {
-    ssize_t sentBytes = 0;
-    ssize_t recvBytes = 0;
-    char buf[1024];
-    char *status_code;
-    int ret_code, sockfd, sockopt;
-    int check_codes[] = 
-        {200,201,202,203,204,205,206,207,208,226,300,301,302,303,304,305,306,307,308,401,402,403,407,418,451};
-    for (;res != NULL; res->ai_next) {
-        sockfd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
-        if (sockfd == -1) {
-            perror("socket");
-            exit(EXIT_FAILURE);
-            continue;
-        }
-        if (connect(sockfd, res->ai_addr, res->ai_addrlen) == -1) {
-            perror("connect");
-            close(sockfd);
-            exit(EXIT_FAILURE);
-            continue;
-        }
-        break;
-    }
-    if (https == true) {
-        const SSL_METHOD *method;
-        SSL_CTX *ctx;
-        SSL *ssl;
-        OpenSSL_add_all_algorithms(); /* Load cryptos */
-        SSL_load_error_strings(); /* Bring in and register err msg */
-        method = TLSv1_2_client_method(); /* Create new client method */
-        ctx = SSL_CTX_new(method); /* Create new context */
-        if (ctx == NULL) {
-            ERR_print_errors_fp(stderr);
-            exit(EXIT_FAILURE);
-        }
-        ssl = SSL_new(ctx); /* Create new SSL connection state */
-        SSL_set_fd(ssl, sockfd); /* attach the socket descriptor */
-        if (SSL_connect(ssl) == -1) { /* Perform the connection */
-            ERR_print_errors_fp(stderr);
-            abort();
-        }
-        SSL_write(ssl, request, reqlen); /* Encrypt and send */
-        SSL_read(ssl, buf, sizeof(buf)); /* Receive and decrypt */
-        SSL_free(ssl);
-        if (close(sockfd) == -1) {
-            perror("shutdown");
-            exit(EXIT_FAILURE);
-        }
-        SSL_CTX_free(ctx); /* Release context */
-    } else {
-        sentBytes = send(sockfd, request, reqlen, 0);
-        if ( !((int)sentBytes == reqlen) )  {
-            perror("send");
-            exit(EXIT_FAILURE);
-        }
-        recvBytes = recv(sockfd, buf, sizeof(buf), 0);
-        if (close(sockfd) == -1) {
-            perror("shutdown");
-            exit(EXIT_FAILURE);
-        }
-    }
-    status_code = strchr(buf, ' ');
-    status_code++;
-    status_code[3] = '\0';
-    ret_code = (int)strtol(status_code, NULL, 10);
-    for (int i = 0; i < (sizeof(check_codes)/sizeof(check_codes[0])); i++) {
-        if (check_codes[i] == ret_code) {
-            printf("[%d] %s\n", ret_code, test_req);
-            break;
-        }
-    }
-}
-
-void prepare_request(char *program_name, char *tempStr, int post_len, int nread, char *cur_dir_req, char *url_postfix, char *url_addr, struct addrinfo *res, bool https) {
+coroutine void prepare_request(char *program_name, char *tempStr, int post_len, int nread, char *cur_dir_req, char *url_postfix, char *url_addr, char *headers, struct ipaddr *res, bool https) {
     int request_length;
-    char get_request[] = "GET %s HTTP/1.0\r\nHost: %s\r\n\r\n";
+    char *get_request;
     char request[4096];
     const char *comma_delim = ",";
     char *cur_ext = strtok(tempStr, comma_delim);
@@ -127,17 +47,49 @@ void prepare_request(char *program_name, char *tempStr, int post_len, int nread,
             snprintf(dir_req, newLen, "%s%s.%s", url_postfix, tmp_curDir, cur_ext);
         }
         tmpPtr = '\0';
-        request_length = snprintf(request, 4096, get_request, dir_req, url_addr);
-        pid_t npid = fork();
-        if (npid == -1) {
-            perror("fork");
+        if (headers != "") {
+            get_request = "GET %s HTTP/1.0\r\nHost: %s\r\n%s\r\n\r\n";
+            request_length = snprintf(request, 4096, get_request, dir_req, url_addr, headers);
+        } else {
+            get_request = "GET %s HTTP/1.0\r\nHost: %s\r\n\r\n";
+            request_length = snprintf(request, 4096, get_request, dir_req, url_addr);
+        }
+        /* Send the request */
+        char buf[1024];
+        char *status_code;
+        int ret_code, sockfd;
+        int check_codes[] = 
+            {200,201,202,203,204,205,206,207,208,226,300,301,302,303,304,305,306,307,308,401,402,403,407,418,451};
+        sockfd = tcp_connect(res, -1);
+        if (sockfd == -1) {
+            fprintf(stderr, "[X] Could not connect socket\n");
             exit(EXIT_FAILURE);
         }
-        if (!npid) {
-            prctl(PR_SET_PDEATHSIG, SIGKILL);
-            validate(program_name, request, request_length, dir_req, res, https);
-            exit(EXIT_SUCCESS);
+        if (https == true) {
+            sockfd = tls_attach_client(sockfd, -1);
+            if (sockfd == -1) {
+                fprintf(stderr, "[X] Error creating TLS protocol on underlying socket\n");
+                exit(EXIT_FAILURE);
+            }
         }
+        bsend(sockfd, request, request_length, -1);
+        brecv(sockfd, buf, sizeof(buf), -1);
+        if (https == true) {
+            sockfd = tls_detach(sockfd, -1);
+        }
+        tcp_close(sockfd, -1);
+        status_code = strchr(buf, ' ');
+        status_code++;
+        status_code[3] = '\0';
+        ret_code = (int)strtol(status_code, NULL, 10);
+        for (int i = 0; i < (sizeof(check_codes)/sizeof(check_codes[0])); i++) {
+            if (check_codes[i] == ret_code) {
+                printf("[%d] %s\n", ret_code, dir_req);
+                break;
+            }
+        }
+        /* Request sent */
+        //printf("%s", request);
         cur_ext = strtok(NULL, comma_delim);
     }
 }
@@ -147,9 +99,9 @@ int main(int argc, char **argv) {
         usage(argv[0]);
     }
     int option = 0;
-    int urlf, wlf, xf;
-    urlf = wlf = xf = 0;
-    while((option = getopt(argc, argv, "u:w:x:")) != -1) {
+    int urlf, wlf, xf, df, tf;
+    urlf = wlf = xf = df = tf = 0;
+    while((option = getopt(argc, argv, "u:w:x:d:t:")) != -1) {
         switch (option) { /* Loop through command line flags */
             case 'u':
                 urlf = optind-1;
@@ -159,6 +111,12 @@ int main(int argc, char **argv) {
                 break;
             case 'x':
                 xf = optind-1;
+                break;
+            case 'd':
+                df = optind-1;
+                break;
+            case 't':
+                tf = optind-1;
                 break;
             default:
                 usage(argv[0]);
@@ -172,6 +130,7 @@ int main(int argc, char **argv) {
     char *url_token;
     char *url_addr;
     char *urlPtr;
+    char *headers;
     const char *slash_delim = "/";
     bool https = false;
     url_token = strtok(argv[urlf], slash_delim);
@@ -205,25 +164,30 @@ int main(int argc, char **argv) {
     }
     printf("Target: %s//%s:%d\n", url_token, url_addr, port);
     printf("Directory: %s\n", url_postfix);
+    if (df != 0) { /* Check if data is appended to request */
+        headers = argv[df];
+        printf("Data: %s\n", headers);
+    } else {
+        headers = "";
+    }
+    int threads;
+    if (tf != 0) { /* Check for user defined threads */
+        threads = (int)strtol(argv[tf], NULL, 10);
+    } else {
+        threads = 10;
+    }
+    printf("Threads: %d\n", threads);
     snprintf(port_string, sizeof(port_string), "%d", port);
-    struct addrinfo hints;
-    struct addrinfo *res;
+    struct ipaddr res;
     int s;
-    memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_INET;
-    hints.ai_socktype = SOCK_STREAM;
-    s = getaddrinfo(url_addr, port_string, &hints, &res);
+    s = ipaddr_remote(&res, url_addr, port, 0, -1);
     if (s != 0) {
-        fprintf(stderr, "getaddrinfo: %s", gai_strerror(s));
+        fprintf(stderr, "[X] Error resolving remote address\n");
         usage(argv[0]);
     }
-    char hbuf[NI_MAXHOST];
-    socklen_t addrlen;
-    if (getnameinfo(res->ai_addr, res->ai_addrlen, hbuf, sizeof(hbuf), NULL, 0, NI_NUMERICHOST) == 0) {
-        printf("IPv4: %s\n\n", hbuf);
-    }
-    char get_request[] = "GET %s HTTP/1.0\r\nHost: %s\r\n\r\n";
-    char request[4096];
+    char hbuf[17];
+    ipaddr_str(&res, hbuf);
+    printf("IPv4: %s\n\n", hbuf);
     char *cur_dir_req = NULL;
     FILE *wordlist;
     size_t len = 0;
@@ -234,27 +198,28 @@ int main(int argc, char **argv) {
         perror("fopen");
         usage(argv[0]);
     }
+    int bees = bundle();
+    int val = 0;
     while ((nread = getline(&cur_dir_req, &len, wordlist) ) != -1) {
+        if (val == threads) {
+            bundle_wait(bees, -1);
+            val = 0;
+        }
         if (xf != 0) {
             char tempStr[sizeof(argv[xf])+1+2];
             char *tmpPtr = (char *)(&argv[xf]+1) - 1;
             tmpPtr = '\0';
             snprintf(tempStr, sizeof(argv[xf])+3, " ,%s", argv[xf]);
-            prepare_request(argv[0], tempStr, post_len, nread, cur_dir_req, url_postfix, url_addr, res, https);
+            bundle_go(bees, prepare_request(argv[0], tempStr, post_len, nread, cur_dir_req, url_postfix, url_addr, headers, &res, https));
+            val++;
         } else {
             char tempStr[] = " ,";
-            prepare_request(argv[0], tempStr, post_len, nread, cur_dir_req, url_postfix, url_addr, res, https);
+            bundle_go(bees, prepare_request(argv[0], tempStr, post_len, nread, cur_dir_req, url_postfix, url_addr, headers, &res, https));
+            val++;
         }
     }
-    /* Wait for forks to complete */
-    while(1) {
-        wait(NULL);
-        if (errno == ECHILD) {
-            break;
-        }
-    }
-
-    freeaddrinfo(res);
+    bundle_wait(bees, -1);
+    hclose(bees);
     free(cur_dir_req);
     fclose(wordlist);
 
