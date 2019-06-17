@@ -16,14 +16,16 @@
 #include <libdill.h>
 
 void usage(char *argument) {
-    fprintf(stderr, "Usage: %s -u <url> -w <wordlist> -x <extensions>\n", argument);
-    fprintf(stderr, "       -u          URL\n");
-    fprintf(stderr, "       -w          Wordlist\n");
-    fprintf(stderr, "       -x          Extensions (optional)\n");
-    fprintf(stderr, "       -d          Add headers to request (optional)\n");
-    fprintf(stderr, "       -t          Threads (default: 10)\n");
-    fprintf(stderr, "Example:\n");
-    fprintf(stderr, "  %s -u http://example.com:8000/test/ -w rockyou.txt -x php,txt,html -d \"Authorization: YWRtaW46YWRtaW4=\" -t 60\n", argument);
+    fprintf(stderr, "cbuster v1.0 - written by postrequest\n", argument);
+    fprintf(stderr, "\nOptions:\n", argument);
+    fprintf(stderr, "  -u          URL\n");
+    fprintf(stderr, "  -w          Wordlist\n");
+    fprintf(stderr, "  -x          Extensions (optional)\n");
+    fprintf(stderr, "  -d          Add header to request (optional)\n");
+    fprintf(stderr, "  -t          Threads (default: 10)\n");
+    fprintf(stderr, "\nUsage:\n");
+    fprintf(stderr, "  %s -u <url> -w <wordlist> -x <extensions>\n", argument);
+    fprintf(stderr, "  %s -u https://example.com:8000/test/ -w rockyou.txt -x php,txt,html -d \"Authorization: YWRtaW46YWRtaW4=\" -t 60\n", argument);
     exit(EXIT_FAILURE);
 }
 
@@ -89,7 +91,6 @@ coroutine void prepare_request(char *program_name, char *tempStr, int post_len, 
             }
         }
         /* Request sent */
-        //printf("%s", request);
         cur_ext = strtok(NULL, comma_delim);
     }
 }
