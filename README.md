@@ -1,6 +1,6 @@
 # cbuster
 
-Simple and quick (Directory && File) Fuzzer.
+Simple and quick (directory && file) fuzzer.
 
 ## Dependencies
 * libdill - (http://libdill.org/download.html) --enable-tls
