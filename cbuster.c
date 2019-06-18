@@ -29,70 +29,68 @@ void usage(char *argument) {
     exit(EXIT_FAILURE);
 }
 
-coroutine void prepare_request(char *program_name, char *tempStr, int post_len, int nread, char *cur_dir_req, char *url_postfix, char *url_addr, char *headers, struct ipaddr *res, bool https) {
+void generate_random_string(char *randomstring, int size) {
+    srand(now());
+    int i; 
+    char base[62]="abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890";
+    for (i = 0; i < (size-1); i++) {
+        randomstring[i] = base[rand() % (sizeof(base) - 1)];
+    }
+    randomstring[(size-1)] = '\0';
+}
+
+coroutine void prepare_request(char *program_name, char *dir_req, int post_len, int nread, char *cur_dir_req, char *url_postfix, char *url_addr, char *headers, struct ipaddr *res, bool https, bool wildcard) {
     int request_length;
     char *get_request;
     char request[4096];
-    const char *comma_delim = ",";
-    char *cur_ext = strtok(tempStr, comma_delim);
-    while (cur_ext != NULL) {
-        int newLen = (post_len-1)+(int)nread+(sizeof(cur_ext));
-        char dir_req[newLen];
-        char tmp_curDir[nread];
-        snprintf(tmp_curDir, nread, "%s", cur_dir_req);
-        char *tmpPtr = (char *)(&tmp_curDir+1) - 2;
-        tmpPtr = '\0';
-        tmpPtr = (char *)(&dir_req+1) - 1;
-        if (*cur_ext == ' ') {
-            snprintf(dir_req, newLen, "%s%s/", url_postfix, tmp_curDir, cur_ext);
-        } else {
-            snprintf(dir_req, newLen, "%s%s.%s", url_postfix, tmp_curDir, cur_ext);
-        }
-        tmpPtr = '\0';
-        if (headers != "") {
-            get_request = "GET %s HTTP/1.0\r\nHost: %s\r\n%s\r\n\r\n";
-            request_length = snprintf(request, 4096, get_request, dir_req, url_addr, headers);
-        } else {
-            get_request = "GET %s HTTP/1.0\r\nHost: %s\r\n\r\n";
-            request_length = snprintf(request, 4096, get_request, dir_req, url_addr);
-        }
-        /* Send the request */
-        char buf[1024];
-        char *status_code;
-        int ret_code, sockfd;
-        int check_codes[] = 
-            {200,201,202,203,204,205,206,207,208,226,300,301,302,303,304,305,306,307,308,401,402,403,407,418,451};
-        sockfd = tcp_connect(res, -1);
+    if (headers != "") {
+        get_request = "GET %s HTTP/1.0\r\nHost: %s\r\n%s\r\n\r\n";
+        request_length = snprintf(request, 4096, get_request, dir_req, url_addr, headers);
+    } else {
+        get_request = "GET %s HTTP/1.0\r\nHost: %s\r\n\r\n";
+        request_length = snprintf(request, 4096, get_request, dir_req, url_addr);
+    }
+    /* Send the request */
+    char buf[1024];
+    char *status_code;
+    int ret_code, sockfd;
+    int check_codes[] = 
+        {200,201,202,203,204,205,206,207,208,226,300,301,302,303,304,305,306,307,308,401,402,403,407,418,451};
+    sockfd = tcp_connect(res, -1);
+    if (sockfd == -1) {
+        fprintf(stderr, "[X] Could not connect socket\n");
+        exit(EXIT_FAILURE);
+    }
+    if (https == true) {
+        sockfd = tls_attach_client(sockfd, -1);
         if (sockfd == -1) {
-            fprintf(stderr, "[X] Could not connect socket\n");
+            fprintf(stderr, "[X] Error creating TLS protocol on underlying socket\n");
             exit(EXIT_FAILURE);
         }
-        if (https == true) {
-            sockfd = tls_attach_client(sockfd, -1);
-            if (sockfd == -1) {
-                fprintf(stderr, "[X] Error creating TLS protocol on underlying socket\n");
-                exit(EXIT_FAILURE);
-            }
-        }
-        bsend(sockfd, request, request_length, -1);
-        brecv(sockfd, buf, sizeof(buf), -1);
-        if (https == true) {
-            sockfd = tls_detach(sockfd, -1);
-        }
-        tcp_close(sockfd, -1);
-        status_code = strchr(buf, ' ');
-        status_code++;
-        status_code[3] = '\0';
-        ret_code = (int)strtol(status_code, NULL, 10);
-        for (int i = 0; i < (sizeof(check_codes)/sizeof(check_codes[0])); i++) {
-            if (check_codes[i] == ret_code) {
-                printf("[%d] %s\n", ret_code, dir_req);
-                break;
-            }
-        }
-        /* Request sent */
-        cur_ext = strtok(NULL, comma_delim);
     }
+    bsend(sockfd, request, request_length, -1);
+    brecv(sockfd, buf, sizeof(buf), -1);
+    if (https == true) {
+        sockfd = tls_detach(sockfd, -1);
+    }
+    tcp_close(sockfd, -1);
+    status_code = strchr(buf, ' ');
+    status_code++;
+    status_code[3] = '\0';
+    ret_code = (int)strtol(status_code, NULL, 10);
+    for (int i = 0; i < (sizeof(check_codes)/sizeof(check_codes[0])); i++) {
+        if (check_codes[i] == ret_code) {
+            if (wildcard) {
+                printf("[X] Wilcard URL match\n\n");
+                printf("[%d] %s\n\n", ret_code, dir_req);
+                printf("[*] Exiting\n\n");
+                exit(EXIT_SUCCESS);
+            }
+            printf("[%d] %s\n", ret_code, dir_req);
+            break;
+        }
+    }
+    /* Request sent */
 }
 
 int main(int argc, char **argv) {
@@ -201,6 +199,15 @@ int main(int argc, char **argv) {
     }
     int bees = bundle();
     int val = 0;
+    /* Generate  and test for wildcard */
+    int randomStringSize = 225;
+    char randomstring[randomStringSize];
+    generate_random_string((char *)&randomstring, randomStringSize);
+    char wildcardHTTP[randomStringSize+1];
+    wildcardHTTP[0] = '/';
+    snprintf(&wildcardHTTP[1], randomStringSize, "%s", randomstring);
+    prepare_request(argv[0], wildcardHTTP, post_len, randomStringSize+1, cur_dir_req, url_postfix, url_addr, headers, &res, https, true);
+    /* Loop through wordlist */
     while ((nread = getline(&cur_dir_req, &len, wordlist) ) != -1) {
         if (val == threads) {
             bundle_wait(bees, -1);
@@ -211,13 +218,42 @@ int main(int argc, char **argv) {
             char *tmpPtr = (char *)(&argv[xf]+1) - 1;
             tmpPtr = '\0';
             snprintf(tempStr, sizeof(argv[xf])+3, " ,%s", argv[xf]);
-            bundle_go(bees, prepare_request(argv[0], tempStr, post_len, nread, cur_dir_req, url_postfix, url_addr, headers, &res, https));
-            val++;
+            const char *comma_delim = ",";
+            char *cur_ext = strtok(tempStr, comma_delim);
+            while (cur_ext != NULL) {
+                int newLen = (post_len-1)+(int)nread+(sizeof(cur_ext));
+                char dir_req[newLen];
+                char tmp_curDir[nread];
+                snprintf(tmp_curDir, nread, "%s", cur_dir_req);
+                char *tmpPtr = (char *)(&tmp_curDir+1) - 2;
+                tmpPtr = '\0';
+                tmpPtr = (char *)(&dir_req+1) - 1;
+                if (*cur_ext == ' ') {
+                    snprintf(dir_req, newLen, "%s%s", url_postfix, tmp_curDir, cur_ext);
+                } else {
+                    snprintf(dir_req, newLen, "%s%s.%s", url_postfix, tmp_curDir, cur_ext);
+                }
+                tmpPtr = '\0';
+                bundle_go(bees, prepare_request(argv[0], dir_req, post_len, nread, cur_dir_req, url_postfix, url_addr, headers, &res, https, false));
+                cur_ext = strtok(NULL, comma_delim);
+                val++;
+            }
         } else {
-            char tempStr[] = " ,";
-            bundle_go(bees, prepare_request(argv[0], tempStr, post_len, nread, cur_dir_req, url_postfix, url_addr, headers, &res, https));
+            char dir_req[nread+1];
+            snprintf(dir_req, nread+1, "/%s", cur_dir_req);
+            char *tmpPtr = (char *)(&dir_req+1) - 1;
+            *tmpPtr = '\0';
+            bundle_go(bees, prepare_request(argv[0], dir_req, post_len, nread, cur_dir_req, url_postfix, url_addr, headers, &res, https, false));
             val++;
         }
+        /* Check for directory */
+        char dir_req[nread+2];
+        snprintf(dir_req, nread+1, "/%s", cur_dir_req);
+        char *tmpPtr = (char *)(&dir_req+1) - 1;
+        *tmpPtr = '\0';
+        *(--tmpPtr) = '/';
+        bundle_go(bees, prepare_request(argv[0], dir_req, post_len, nread, cur_dir_req, url_postfix, url_addr, headers, &res, https, false));
+        val++;
     }
     bundle_wait(bees, -1);
     hclose(bees);
