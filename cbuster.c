@@ -58,7 +58,7 @@ coroutine void prepare_request(char *program_name, char *dir_req, int post_len, 
         {200,201,202,203,204,205,206,207,208,226,300,301,302,303,304,305,306,307,308,401,402,403,407,418,451};
     sockfd = tcp_connect(res, -1);
     if (sockfd == -1) {
-        fprintf(stderr, "[X] Could not connect socket\n");
+        fprintf(stderr, "[X] Could not connect socket, maybe too many requests\n");
         exit(EXIT_FAILURE);
     }
     if (https == true) {
@@ -209,6 +209,7 @@ int main(int argc, char **argv) {
     prepare_request(argv[0], wildcardHTTP, post_len, randomStringSize+1, cur_dir_req, url_postfix, url_addr, headers, &res, https, true);
     /* Loop through wordlist */
     while ((nread = getline(&cur_dir_req, &len, wordlist) ) != -1) {
+        /* current way manage threads, change to FIFO instead of wait */
         if (val == threads) {
             bundle_wait(bees, -1);
             val = 0;
@@ -221,6 +222,11 @@ int main(int argc, char **argv) {
             const char *comma_delim = ",";
             char *cur_ext = strtok(tempStr, comma_delim);
             while (cur_ext != NULL) {
+                /* current way manage threads, change to FIFO instead of wait */
+                if (val == threads) {
+                    bundle_wait(bees, -1);
+                    val = 0;
+                }
                 int newLen = (post_len-1)+(int)nread+(sizeof(cur_ext));
                 char dir_req[newLen];
                 char tmp_curDir[nread];
