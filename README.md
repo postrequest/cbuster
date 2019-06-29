@@ -3,12 +3,12 @@
 Simple and quick (directory && file) fuzzer.
 
 ## Dependencies
-* libdill - (http://libdill.org/download.html) --enable-tls
+* libdill - (http://libdill.org/download.html) (https://github.com/sustrik/libdill) --enable-tls
 
-### Install
+### Local Install
 ```
 $ git clone https://github.com/postrequest/cbuster.git
 $ cd cbuster/
-$ cc cbuster.c -ldill -o cbuster
+$ ./local-install.sh
 $ ./cbuster
 ```
