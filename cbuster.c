@@ -39,7 +39,7 @@ void generate_random_string(char *randomstring, int size) {
     randomstring[(size-1)] = '\0';
 }
 
-coroutine void prepare_request(char *program_name, char *dir_req, int post_len, int nread, char *cur_dir_req, char *url_postfix, char *url_addr, char *headers, struct ipaddr *res, bool https, bool wildcard) {
+coroutine void prepare_request(char *dir_req, char *url_addr, char *headers, struct ipaddr *res, bool https, bool wildcard) {
     int request_length;
     char *get_request;
     char request[4096];
@@ -187,7 +187,7 @@ int main(int argc, char **argv) {
     char hbuf[17];
     ipaddr_str(&res, hbuf);
     printf("IPv4: %s\n\n", hbuf);
-    char *cur_dir_req = NULL;
+    char *cur_dir_req_nl = NULL;
     FILE *wordlist;
     size_t len = 0;
     ssize_t nread;
@@ -203,17 +203,20 @@ int main(int argc, char **argv) {
     int randomStringSize = 225;
     char randomstring[randomStringSize];
     generate_random_string((char *)&randomstring, randomStringSize);
-    char wildcardHTTP[randomStringSize+1];
-    wildcardHTTP[0] = '/';
-    snprintf(&wildcardHTTP[1], randomStringSize, "%s", randomstring);
-    prepare_request(argv[0], wildcardHTTP, post_len, randomStringSize+1, cur_dir_req, url_postfix, url_addr, headers, &res, https, true);
+    char wildcardHTTP[sizeof(url_postfix)+randomStringSize+1];
+    snprintf(&wildcardHTTP[0], (sizeof(url_postfix)+randomStringSize+1), "%s%s", url_postfix, randomstring);
+    prepare_request(wildcardHTTP, url_addr, headers, &res, https, true);
     /* Loop through wordlist */
-    while ((nread = getline(&cur_dir_req, &len, wordlist) ) != -1) {
+    while ((nread = getline(&cur_dir_req_nl, &len, wordlist) ) != -1) {
         /* current way manage threads, change to FIFO instead of wait */
         if (val == threads) {
             bundle_wait(bees, -1);
             val = 0;
         }
+        /* remove '\n' from word */
+        char cur_dir_req[nread];
+        snprintf(cur_dir_req, nread, "%s", cur_dir_req_nl);
+        cur_dir_req[nread] = '\0';
         if (xf != 0) {
             char tempStr[sizeof(argv[xf])+1+2];
             char *tmpPtr = (char *)(&argv[xf]+1) - 1;
@@ -229,41 +232,30 @@ int main(int argc, char **argv) {
                 }
                 int newLen = (post_len-1)+(int)nread+(sizeof(cur_ext));
                 char dir_req[newLen];
-                char tmp_curDir[nread];
-                snprintf(tmp_curDir, nread, "%s", cur_dir_req);
-                char *tmpPtr = (char *)(&tmp_curDir+1) - 2;
-                tmpPtr = '\0';
-                tmpPtr = (char *)(&dir_req+1) - 1;
                 if (*cur_ext == ' ') {
-                    snprintf(dir_req, newLen, "%s%s", url_postfix, tmp_curDir, cur_ext);
+                    snprintf(dir_req, newLen, "%s%s", url_postfix, cur_dir_req, cur_ext);
                 } else {
-                    snprintf(dir_req, newLen, "%s%s.%s", url_postfix, tmp_curDir, cur_ext);
+                    snprintf(dir_req, newLen, "%s%s.%s", url_postfix, cur_dir_req, cur_ext);
                 }
-                tmpPtr = '\0';
-                bundle_go(bees, prepare_request(argv[0], dir_req, post_len, nread, cur_dir_req, url_postfix, url_addr, headers, &res, https, false));
+                bundle_go(bees, prepare_request(dir_req, url_addr, headers, &res, https, false));
                 cur_ext = strtok(NULL, comma_delim);
                 val++;
             }
         } else {
-            char dir_req[nread+1];
-            snprintf(dir_req, nread+1, "/%s", cur_dir_req);
-            char *tmpPtr = (char *)(&dir_req+1) - 1;
-            *tmpPtr = '\0';
-            bundle_go(bees, prepare_request(argv[0], dir_req, post_len, nread, cur_dir_req, url_postfix, url_addr, headers, &res, https, false));
+            char dir_req[sizeof(url_postfix) + nread];
+            snprintf(dir_req, (sizeof(url_postfix) + nread), "%s%s", url_postfix, cur_dir_req);
+            bundle_go(bees, prepare_request(dir_req, url_addr, headers, &res, https, false));
             val++;
         }
         /* Check for directory */
-        char dir_req[nread+2];
-        snprintf(dir_req, nread+1, "/%s", cur_dir_req);
-        char *tmpPtr = (char *)(&dir_req+1) - 1;
-        *tmpPtr = '\0';
-        *(--tmpPtr) = '/';
-        bundle_go(bees, prepare_request(argv[0], dir_req, post_len, nread, cur_dir_req, url_postfix, url_addr, headers, &res, https, false));
+        char dir_req[sizeof(url_postfix) + nread+1];
+        snprintf(dir_req, (sizeof(url_postfix) + nread), "%s%s/", url_postfix, cur_dir_req);
+        bundle_go(bees, prepare_request(dir_req, url_addr, headers, &res, https, false));
         val++;
     }
     bundle_wait(bees, -1);
     hclose(bees);
-    free(cur_dir_req);
+    free(cur_dir_req_nl);
     fclose(wordlist);
 
     return 0;
