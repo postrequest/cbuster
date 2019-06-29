@@ -14,4 +14,4 @@ make
 cd ..
 
 # statically compile the binary
-cc cbuster.c libdill-2.14/libdill.h libdill-2.14/.lib/libdill.a -static -lssl -ltls -lcrypto -pthread -o cbuster
+cc cbuster.c libdill-2.14/libdill.h libdill-2.14/.libs/libdill.a -static -lssl -ltls -lcrypto -pthread -o cbuster
