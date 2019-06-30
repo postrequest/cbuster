@@ -9,6 +9,6 @@ Simple and quick (directory && file) fuzzer.
 
 ### Local Install
 ```
-$ git clone https://github.com/postrequest/cbuster.git && cd cbuster && cc cbuster.c -ldill -o cbuster
+$ git clone https://github.com/postrequest/cbuster.git && cd cbuster && ./local-install.sh
 $ ./cbuster
 ```
